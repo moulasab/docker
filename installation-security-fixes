@@ -1,0 +1,165 @@
+Docker Installation in AlmaLinux 8.7 
+
+sudo dnf update
+
+sudo dnf install -y yum-utils
+
+sudo yum-config-manager \
+
+    --add-repo \
+
+    https://download.docker.com/linux/centos/docker-ce.repo
+
+sudo dnf install docker-ce docker-ce-cli http://containerd.io 
+
+sudo systemctl start docker
+
+sudo systemctl enable docker
+Run docker as non root user using below commands:
+
+
+sudo groupadd docker
+
+sudo usermod -aG docker $USER
+
+newgrp docker
+ 
+
+Additional EBS to store docker data
+
+Create additional EBS volume of 30 GB and attach to running alma linux 
+
+
+sudo file -s /dev/nvme1n1
+
+sudo mkfs -t ext4 /dev/nvme1n1 /data/lib/docker
+
+sudo mount /dev/nvme1n1 /data/lib/docker
+
+Add additional EBS UUID in /etc/fstab
+
+UUID=2f174e30-47c3-4b2f-9367-f859b2b11e38  /data/lib/docker  ext4  defaults,nofail  0  2
+Change Default Root Path for docker from /var/lib/docker
+Go to /etc/docker/
+
+Create a file daemon.json if doesn’t already exists
+
+Content of daemon.json
+
+
+{  "data-root":"/data/lib/docker"}
+Copy all data from /var/lib/docker to the configured path, for e.g.  /data/lib/docker 
+
+
+rsync -rav /var/lib/docker /data/lib/docker
+Restart docker service
+
+
+systemctl restart docker.service
+ 
+
+Docker security compliance report 
+
+Initial report 
+
+Rescan report 
+
+ 
+
+Add docker rules in auditd service 
+
+
+Comment out below lines in /usr/lib/systemd/system/auditd.service
+
+ExecStartPost=-/sbin/auditctl -R /etc/audit/audit.rules
+ExecStartPost=-/sbin/augenrules --load
+RefuseManualStop=no
+
+Reload deamon then restart auditd
+   systemctl daemon-reload 
+   service auditd restart or systemctl restart auditd 
+
+Add rules in /etc/audit/rules.d/ directory 
+
+Ex: docker.rules, usermod.rules
+
+Reload daemon
+systemctl daemon-reload 
+
+Load the rules into active configuration 
+   augenrules --load
+
+Restart auditd service
+   service auditd restart  
+
+Check added rules 
+   auditctl -l 
+
+
+TLS configuration steps in Docker 
+
+wget https://raw.githubusercontent.com/AlexisAhmed/DockerSecurityEssentials/main/Docker-TLS-Authentication/secure-docker-daemon.sh
+
+sudo chmod u+x secure-docker-daemon.sh
+
+./secure-docker-daemon.sh (Enter password and IP of the Server)
+
+certs will generate in .docker folder 
+
+sudo  mkdir /etc/systemd/system/docker.service.d/
+
+sudo vim /etc/systemd/system/docker.service.d/override.conf
+
+[Service]
+
+ExecStart=
+
+ExecStart=/usr/bin/dockerd -H unix:///var/run/docker.sock -H tcp://0.0.0.0:2376
+
+systemctl daemon-reload 
+
+systemctl restart docker 
+
+Verify docker commands using TLS certs
+
+docker -H 10.10.1.74:2376 --tls --tlscert=/labkey/apps/ssl/client-cert.pem --tlskey=/labkey/apps/ssl/client-key.pem  --tlscacert=/labkey/apps/ssl/ca.pem  ps -a
+ 
+
+Authorization Plugin Implementation in Docker 
+
+Follow the steps mentioned in this link  https://github.com/casbin/docker-casbin-plugin 
+
+Install go-lang 
+
+sudo dnf install golang
+
+Set system path for go-lang 
+
+export GOPATH=/usr/local/go
+
+Build 
+
+go get http://github.com/casbin/casbin-authz-plugin 
+
+cd $GOPATH/src/github.com/casbin/casbin-authz-plugin
+
+make (update docker path in this Makefile) 
+
+sudo make install
+
+Check the cabin-authz-plugin service 
+
+systemctl status casbin-authz-plugin
+
+Check and add permission for  cabin-authz-plugin 
+
+  chcon -R -t bin_t casbin-authz-plugin - to check temporarily whether its gets executed or not. this will go away if restorcon is run.
+  semanage fcontext -a -t bin_t "/data/lib/docker/casbin-authz-plugin" - to enable it permanently.
+
+systemctl restart casbin-authz-plugin
+
+Add cabin-auth-plugin in docker daemon.json file or docker service file 
+
+/etc/docker/daemon.json 
+
+"authorization-plugins": ["casbin-authz-plugin"]
